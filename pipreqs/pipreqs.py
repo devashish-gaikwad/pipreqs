@@ -19,6 +19,8 @@ Options:
                           parameter in your terminal:
                           $ export HTTP_PROXY="http://10.10.1.10:3128"
                           $ export HTTPS_PROXY="https://10.10.1.10:1080"
+    --trusted-host        Ignore SSL warnings, recommended using with
+                          enterprise proxy.
     --debug               Print debug information.
     --ignore <dirs>...    Ignore extra directories, each separated by a comma.
     --no-follow-links     Do not follow symbolic links in the project
@@ -46,6 +48,8 @@ from docopt import docopt
 import requests
 from yarg import json2package
 from yarg.exceptions import HTTPError
+from urllib3 import disable_warnings
+from urllib3.exceptions import InsecureRequestWarning
 
 from pipreqs import __version__
 
@@ -157,8 +161,8 @@ def get_all_imports(
     return list(packages - data)
 
 
-def filter_line(l):
-    return len(l) > 0 and l[0] != "#"
+def filter_line(line):
+    return len(line) > 0 and line[0] != "#"
 
 
 def generate_requirements_file(path, imports):
@@ -179,13 +183,15 @@ def output_requirements(imports):
 
 
 def get_imports_info(
-        imports, pypi_server="https://pypi.python.org/pypi/", proxy=None):
+        imports, pypi_server="https://pypi.python.org/pypi/", proxy=None,
+        verify_ssl=True):
     result = []
 
     for item in imports:
         try:
             response = requests.get(
-                "{0}{1}/json".format(pypi_server, item), proxies=proxy)
+                "{0}{1}/json".format(pypi_server, item), proxies=proxy,
+                verify=verify_ssl)
             if response.status_code == 200:
                 if hasattr(response.content, 'decode'):
                     data = json2package(response.content.decode())
@@ -396,12 +402,16 @@ def init(args):
     encoding = args.get('--encoding')
     extra_ignore_dirs = args.get('--ignore')
     follow_links = not args.get('--no-follow-links')
+    verify_ssl = not args.get('--trusted-host')
     input_path = args['<path>']
     if input_path is None:
         input_path = os.path.abspath(os.curdir)
 
     if extra_ignore_dirs:
         extra_ignore_dirs = extra_ignore_dirs.split(',')
+
+    if not verify_ssl:
+        disable_warnings(InsecureRequestWarning)
 
     candidates = get_all_imports(input_path,
                                  encoding=encoding,
@@ -429,7 +439,8 @@ def init(args):
                       if x.lower() not in [z['name'].lower() for z in local]]
         imports = local + get_imports_info(difference,
                                            proxy=proxy,
-                                           pypi_server=pypi_server)
+                                           pypi_server=pypi_server,
+                                           verify_ssl=verify_ssl)
 
     path = (args["--savepath"] if args["--savepath"] else
             os.path.join(input_path, "requirements.txt"))
